@@ -27,6 +27,7 @@ export class AtlassianClient {
 
   withToken(accessToken: string): AtlassianClient {
     const c = new AtlassianClient({ accessToken });
+    c.cloudId = this.cloudId;
     return c;
   }
 

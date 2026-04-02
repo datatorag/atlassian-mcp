@@ -420,7 +420,7 @@ export async function handleConfluence(
         container: { type: "page", id: pageId },
         body: {
           storage: {
-            value: `<p>${body}</p>`,
+            value: `<p>${body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`,
             representation: "storage",
           },
         },
