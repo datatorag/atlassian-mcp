@@ -29,13 +29,19 @@ export const confluenceTools = [
   {
     name: "confluence_get_page",
     description:
-      "Get a single Confluence page by ID, including its XHTML body content and version info.",
+      "Get a single Confluence page by ID. Use format 'text' (default) for reading/summarizing — returns clean text with much less context usage. Use format 'storage' when you need to edit the page, as it returns the full XHTML storage format needed for write-back.",
     inputSchema: {
       type: "object" as const,
       properties: {
         page_id: {
           type: "string",
           description: "The ID of the page to retrieve.",
+        },
+        format: {
+          type: "string",
+          enum: ["text", "storage"],
+          description:
+            "Output format. 'text' (default): clean readable text, optimized for reading/summarizing. 'storage': raw XHTML storage format, needed for editing with confluence_edit_page.",
         },
       },
       required: ["page_id"],
@@ -253,6 +259,114 @@ function summarisePage(page: ConfluencePage, baseUrl?: string) {
 }
 
 // ---------------------------------------------------------------------------
+// XHTML storage format → plain text converter
+// ---------------------------------------------------------------------------
+
+function xhtmlToText(xhtml: string): string {
+  let text = xhtml;
+
+  // Replace headings with markdown-style headings
+  text = text.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, level, content) => {
+    const prefix = "#".repeat(Number(level));
+    return `\n${prefix} ${stripTags(content).trim()}\n`;
+  });
+
+  // Convert tables to markdown tables
+  text = text.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_m, tableContent) => {
+    const rows: string[][] = [];
+    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let rowMatch;
+    while ((rowMatch = rowRegex.exec(tableContent)) !== null) {
+      const cells: string[] = [];
+      const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
+      let cellMatch;
+      while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+        cells.push(stripTags(cellMatch[1]).trim());
+      }
+      if (cells.length > 0) rows.push(cells);
+    }
+    if (rows.length === 0) return "";
+    const colCount = Math.max(...rows.map((r) => r.length));
+    const padded = rows.map((r) => {
+      while (r.length < colCount) r.push("");
+      return r;
+    });
+    let md = "\n| " + padded[0].join(" | ") + " |\n";
+    md += "| " + padded[0].map(() => "---").join(" | ") + " |\n";
+    for (let i = 1; i < padded.length; i++) {
+      md += "| " + padded[i].join(" | ") + " |\n";
+    }
+    return md;
+  });
+
+  // Lists
+  text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m, content) => {
+    return `\n- ${stripTags(content).trim()}`;
+  });
+
+  // Code blocks
+  text = text.replace(
+    /<ac:structured-macro[^>]*ac:name="code"[^>]*>[\s\S]*?<ac:plain-text-body>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/ac:plain-text-body>[\s\S]*?<\/ac:structured-macro>/gi,
+    (_m, code) => `\n\`\`\`\n${code.trim()}\n\`\`\`\n`,
+  );
+
+  // Confluence macros: extract text content, drop the macro wrapper
+  text = text.replace(
+    /<ac:structured-macro[^>]*>([\s\S]*?)<\/ac:structured-macro>/gi,
+    (_m, inner) => {
+      // Extract rich-text-body content if present
+      const bodyMatch = inner.match(
+        /<ac:rich-text-body>([\s\S]*?)<\/ac:rich-text-body>/i,
+      );
+      return bodyMatch ? bodyMatch[1] : "";
+    },
+  );
+
+  // Links
+  text = text.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, linkText) => {
+    const clean = stripTags(linkText).trim();
+    return clean ? `[${clean}](${href})` : href;
+  });
+
+  // Confluence user mentions
+  text = text.replace(
+    /<ac:link><ri:user[^>]*ri:userkey="[^"]*"[^/]*\/><ac:plain-text-link-body>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/ac:plain-text-link-body><\/ac:link>/gi,
+    (_m, name) => `@${name.trim()}`,
+  );
+
+  // Images / attachments: note their presence without the data
+  text = text.replace(/<ac:image[^>]*>[\s\S]*?<ri:attachment ri:filename="([^"]*)"[^/]*\/>[\s\S]*?<\/ac:image>/gi,
+    (_m, filename) => `[image: ${filename}]`,
+  );
+
+  // Line breaks and paragraphs
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<\/p>/gi, "\n");
+  text = text.replace(/<p[^>]*>/gi, "");
+
+  // Strip remaining HTML tags
+  text = stripTags(text);
+
+  // Decode common HTML entities
+  text = text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+
+  // Clean up whitespace: collapse multiple blank lines
+  text = text.replace(/\n{3,}/g, "\n\n").trim();
+
+  return text;
+}
+
+function stripTags(html: string): string {
+  return html.replace(/<[^>]*>/g, "");
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -279,17 +393,29 @@ export async function handleConfluence(
     // ── Get page ──────────────────────────────────────────────────
     case "confluence_get_page": {
       const pageId = args.page_id as string;
+      const format = (args.format as string | undefined) ?? "text";
 
       const page = (await client.confluenceGet(
         `/content/${encodeURIComponent(pageId)}?expand=body.storage,version`,
       )) as ConfluencePage;
 
-      return jsonResponse({
-        id: page.id,
-        title: page.title,
-        version: page.version?.number ?? null,
-        body: page.body?.storage?.value ?? null,
-      });
+      const rawBody = page.body?.storage?.value ?? null;
+
+      if (format === "storage") {
+        return jsonResponse({
+          id: page.id,
+          title: page.title,
+          version: page.version?.number ?? null,
+          format: "storage",
+          body: rawBody,
+        });
+      }
+
+      return textResponse(
+        `# ${page.title}\n\n` +
+          `Page ID: ${page.id} | Version: ${page.version?.number ?? "?"}\n\n` +
+          (rawBody ? xhtmlToText(rawBody) : "(empty page)"),
+      );
     }
 
     // ── Create page ───────────────────────────────────────────────
