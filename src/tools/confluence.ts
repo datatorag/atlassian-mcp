@@ -211,43 +211,67 @@ export const confluenceTools = [
 // Response helpers — shape the Confluence API response into something concise
 // ---------------------------------------------------------------------------
 
-interface ConfluencePage {
+interface V2Page {
   id: string;
   title: string;
+  status?: string;
+  spaceId?: string;
+  parentId?: string | null;
   version?: { number: number };
-  body?: { storage?: { value: string } };
-  _links?: { webui?: string; self?: string };
+  body?: {
+    storage?: { value: string; representation?: string };
+  };
+  _links?: { webui?: string; base?: string };
 }
 
-interface ConfluenceSearchResult {
-  results: ConfluencePage[];
+interface V2PagesResult {
+  results?: V2Page[];
+  _links?: { base?: string; next?: string };
+}
+
+interface V2Comment {
+  id: string;
+  title?: string;
+  version?: { number: number };
+  body?: { storage?: { value: string } };
+  _links?: { webui?: string };
+}
+
+interface V2CommentsResult {
+  results?: V2Comment[];
   _links?: { base?: string };
 }
 
-interface ConfluenceChildResult {
-  results: Array<{
-    id: string;
-    title: string;
-    version?: { number: number };
-    body?: { storage?: { value: string } };
+interface V2Attachment {
+  id: string;
+  title: string;
+  mediaType?: string;
+  fileSize?: number;
+  version?: { number: number };
+  downloadLink?: string;
+}
+
+interface V2AttachmentsResult {
+  results?: V2Attachment[];
+  _links?: { base?: string };
+}
+
+// CQL search lives on v1 (no v2 equivalent). Each result wraps the page in
+// a `content` envelope.
+interface V1SearchResult {
+  results?: Array<{
+    title?: string;
+    content?: {
+      id: string;
+      title?: string;
+      version?: { number: number };
+    };
     _links?: { webui?: string };
   }>;
   _links?: { base?: string };
 }
 
-interface ConfluenceAttachmentResult {
-  results: Array<{
-    id: string;
-    title: string;
-    version?: { number: number };
-    metadata?: { mediaType?: string };
-    extensions?: { mediaType?: string; fileSize?: number };
-    _links?: { download?: string; webui?: string };
-  }>;
-  _links?: { base?: string };
-}
-
-function summarisePage(page: ConfluencePage, baseUrl?: string) {
+function summarisePage(page: V2Page, baseUrl?: string) {
   return {
     id: page.id,
     title: page.title,
@@ -380,10 +404,11 @@ export async function handleConfluence(
     case "confluence_list_pages": {
       const spaceKey = args.space_key as string;
       const limit = (args.limit as number | undefined) ?? 25;
+      const spaceId = await client.getSpaceIdByKey(spaceKey);
 
-      const data = (await client.confluenceGet(
-        `/content?spaceKey=${encodeURIComponent(spaceKey)}&type=page&limit=${limit}&expand=version`,
-      )) as ConfluenceSearchResult;
+      const data = (await client.confluenceV2Get(
+        `/spaces/${encodeURIComponent(spaceId)}/pages?limit=${limit}`,
+      )) as V2PagesResult;
 
       const baseUrl = data._links?.base;
       const pages = (data.results ?? []).map((p) => summarisePage(p, baseUrl));
@@ -395,9 +420,9 @@ export async function handleConfluence(
       const pageId = args.page_id as string;
       const format = (args.format as string | undefined) ?? "text";
 
-      const page = (await client.confluenceGet(
-        `/content/${encodeURIComponent(pageId)}?expand=body.storage,version`,
-      )) as ConfluencePage;
+      const page = (await client.confluenceV2Get(
+        `/pages/${encodeURIComponent(pageId)}?body-format=storage`,
+      )) as V2Page;
 
       const rawBody = page.body?.storage?.value ?? null;
 
@@ -424,27 +449,26 @@ export async function handleConfluence(
       const content = args.content as string;
       const spaceKey = args.space_key as string;
       const parentId = args.parent_id as string | undefined;
+      const spaceId = await client.getSpaceIdByKey(spaceKey);
 
       const payload: Record<string, unknown> = {
-        type: "page",
+        spaceId,
+        status: "current",
         title,
-        space: { key: spaceKey },
         body: {
-          storage: {
-            value: content,
-            representation: "storage",
-          },
+          representation: "storage",
+          value: content,
         },
       };
 
       if (parentId) {
-        payload.ancestors = [{ id: parentId }];
+        payload.parentId = parentId;
       }
 
-      const created = (await client.confluencePost(
-        "/content",
+      const created = (await client.confluenceV2Post(
+        "/pages",
         payload,
-      )) as ConfluencePage;
+      )) as V2Page;
 
       return jsonResponse({
         id: created.id,
@@ -462,29 +486,27 @@ export async function handleConfluence(
       let version = args.version as number | undefined;
 
       if (version === undefined) {
-        const current = (await client.confluenceGet(
-          `/content/${encodeURIComponent(pageId)}?expand=version`,
-        )) as ConfluencePage;
+        const current = (await client.confluenceV2Get(
+          `/pages/${encodeURIComponent(pageId)}`,
+        )) as V2Page;
         version = (current.version?.number ?? 0) + 1;
       }
 
       const payload = {
         id: pageId,
-        type: "page",
+        status: "current",
         title,
         body: {
-          storage: {
-            value: content,
-            representation: "storage",
-          },
+          representation: "storage",
+          value: content,
         },
         version: { number: version },
       };
 
-      const updated = (await client.confluencePut(
-        `/content/${encodeURIComponent(pageId)}`,
+      const updated = (await client.confluenceV2Put(
+        `/pages/${encodeURIComponent(pageId)}`,
         payload,
-      )) as ConfluencePage;
+      )) as V2Page;
 
       return jsonResponse({
         id: updated.id,
@@ -496,104 +518,124 @@ export async function handleConfluence(
     // ── Delete page ───────────────────────────────────────────────
     case "confluence_delete_page": {
       const pageId = args.page_id as string;
-      await client.confluenceDelete(
-        `/content/${encodeURIComponent(pageId)}`,
+      await client.confluenceV2Delete(
+        `/pages/${encodeURIComponent(pageId)}`,
       );
       return textResponse(`Page ${pageId} deleted.`);
     }
 
-    // ── Search ────────────────────────────────────────────────────
+    // ── Search (CQL — v1 endpoint, no v2 equivalent) ──────────────
     case "confluence_search": {
       const cql = args.cql as string;
       const limit = (args.limit as number | undefined) ?? 25;
 
-      const data = (await client.confluenceGet(
-        `/content/search?cql=${encodeURIComponent(cql)}&limit=${limit}&expand=version`,
-      )) as ConfluenceSearchResult;
+      const data = (await client.confluenceV1Get(
+        `/search?cql=${encodeURIComponent(cql)}&limit=${limit}&expand=content.version`,
+      )) as V1SearchResult;
 
       const baseUrl = data._links?.base;
-      const results = (data.results ?? []).map((p) =>
-        summarisePage(p, baseUrl),
-      );
+      const results = (data.results ?? []).map((r) => {
+        const c = r.content;
+        const id = c?.id ?? "";
+        const title = c?.title ?? r.title ?? "";
+        const version = c?.version?.number ?? null;
+        const webui = r._links?.webui ?? null;
+        return {
+          id,
+          title,
+          version,
+          link: baseUrl && webui ? `${baseUrl}${webui}` : webui,
+        };
+      });
       return jsonResponse(results);
     }
 
-    // ── Get comments ──────────────────────────────────────────────
+    // ── Get comments (merge footer + inline) ──────────────────────
     case "confluence_get_comments": {
       const pageId = args.page_id as string;
 
-      const data = (await client.confluenceGet(
-        `/content/${encodeURIComponent(pageId)}/child/comment?expand=body.storage,version`,
-      )) as ConfluenceChildResult;
+      const [footer, inline] = (await Promise.all([
+        client.confluenceV2Get(
+          `/pages/${encodeURIComponent(pageId)}/footer-comments?body-format=storage`,
+        ),
+        client.confluenceV2Get(
+          `/pages/${encodeURIComponent(pageId)}/inline-comments?body-format=storage`,
+        ),
+      ])) as [V2CommentsResult, V2CommentsResult];
 
-      const comments = (data.results ?? []).map((c) => ({
-        id: c.id,
-        title: c.title,
-        version: c.version?.number ?? null,
-        body: c.body?.storage?.value ?? null,
-      }));
+      const shape = (data: V2CommentsResult, type: "footer" | "inline") =>
+        (data.results ?? []).map((c) => ({
+          id: c.id,
+          title: c.title ?? null,
+          version: c.version?.number ?? null,
+          type,
+          body: c.body?.storage?.value ?? null,
+        }));
+
+      const comments = [
+        ...shape(footer, "footer"),
+        ...shape(inline, "inline"),
+      ];
       return jsonResponse(comments);
     }
 
-    // ── Add comment ───────────────────────────────────────────────
+    // ── Add comment (footer-comments; inline replies not supported) ─
     case "confluence_add_comment": {
       const pageId = args.page_id as string;
       const body = args.body as string;
       const parentCommentId = args.parent_comment_id as string | undefined;
 
       const payload: Record<string, unknown> = {
-        type: "comment",
-        container: { type: "page", id: pageId },
+        pageId,
         body: {
-          storage: {
-            value: `<p>${body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`,
-            representation: "storage",
-          },
+          representation: "storage",
+          value: `<p>${body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`,
         },
       };
 
       if (parentCommentId) {
-        payload.ancestors = [{ id: parentCommentId }];
+        payload.parentCommentId = parentCommentId;
       }
 
-      const created = (await client.confluencePost(
-        "/content",
+      const created = (await client.confluenceV2Post(
+        "/footer-comments",
         payload,
-      )) as ConfluencePage;
+      )) as V2Comment;
 
       return jsonResponse({
         id: created.id,
-        title: created.title,
         version: created.version?.number ?? null,
       });
     }
 
-    // ── Get attachment ────────────────────────────────────────────
+    // ── Get attachment (filter by filename client-side) ───────────
     case "confluence_get_attachment": {
       const pageId = args.page_id as string;
       const filename = args.filename as string;
 
-      const data = (await client.confluenceGet(
-        `/content/${encodeURIComponent(pageId)}/child/attachment?filename=${encodeURIComponent(filename)}&expand=version`,
-      )) as ConfluenceAttachmentResult;
+      const data = (await client.confluenceV2Get(
+        `/pages/${encodeURIComponent(pageId)}/attachments?limit=250`,
+      )) as V2AttachmentsResult;
 
       const baseUrl = data._links?.base;
-      const attachments = (data.results ?? []).map((a) => ({
-        id: a.id,
-        title: a.title,
-        version: a.version?.number ?? null,
-        mediaType: a.extensions?.mediaType ?? a.metadata?.mediaType ?? null,
-        fileSize: a.extensions?.fileSize ?? null,
-        downloadLink: baseUrl && a._links?.download
-          ? `${baseUrl}${a._links.download}`
-          : a._links?.download ?? null,
-      }));
+      const matches = (data.results ?? []).filter((a) => a.title === filename);
 
-      if (attachments.length === 0) {
+      if (matches.length === 0) {
         return textResponse(
           `No attachment named "${filename}" found on page ${pageId}.`,
         );
       }
+
+      const attachments = matches.map((a) => ({
+        id: a.id,
+        title: a.title,
+        version: a.version?.number ?? null,
+        mediaType: a.mediaType ?? null,
+        fileSize: a.fileSize ?? null,
+        downloadLink: baseUrl && a.downloadLink
+          ? `${baseUrl}${a.downloadLink}`
+          : a.downloadLink ?? null,
+      }));
 
       return jsonResponse(attachments.length === 1 ? attachments[0] : attachments);
     }

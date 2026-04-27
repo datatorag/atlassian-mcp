@@ -9,8 +9,10 @@
  * user's site so that all subsequent API calls target the correct tenant:
  *   GET https://api.atlassian.com/oauth/token/accessible-resources
  *
- * Jira REST v3:      https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/...
- * Confluence REST v1: https://api.atlassian.com/ex/confluence/{cloudId}/rest/api/...
+ * Jira REST v3:       https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/...
+ * Confluence v2:      https://api.atlassian.com/ex/confluence/{cloudId}/wiki/api/v2/...
+ * Confluence v1:      https://api.atlassian.com/ex/confluence/{cloudId}/wiki/rest/api/...
+ *   (v1 is deprecated; only retained here for CQL search, which has no v2 equivalent)
  */
 
 export interface AtlassianClientOptions {
@@ -20,6 +22,7 @@ export interface AtlassianClientOptions {
 export class AtlassianClient {
   private accessToken?: string;
   private cloudId?: string;
+  private spaceIdCache = new Map<string, string>();
 
   constructor(options?: AtlassianClientOptions) {
     this.accessToken = options?.accessToken;
@@ -28,6 +31,7 @@ export class AtlassianClient {
   withToken(accessToken: string): AtlassianClient {
     const c = new AtlassianClient({ accessToken });
     c.cloudId = this.cloudId;
+    c.spaceIdCache = this.spaceIdCache;
     return c;
   }
 
@@ -135,24 +139,24 @@ export class AtlassianClient {
     }
   }
 
-  // ── Confluence helpers ────────────────────────────────────────
+  // ── Confluence v2 helpers (wiki/api/v2) ───────────────────────
 
-  async confluenceGet(path: string): Promise<unknown> {
+  async confluenceV2Get(path: string): Promise<unknown> {
     const cloudId = await this.ensureCloudId();
-    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/rest/api${path}`;
+    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/wiki/api/v2${path}`;
     const res = await fetch(url, { headers: this.headers() });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(
-        `Confluence GET ${path} failed (${res.status}): ${body}`
+        `Confluence v2 GET ${path} failed (${res.status}): ${body}`
       );
     }
     return res.json();
   }
 
-  async confluencePost(path: string, body: unknown): Promise<unknown> {
+  async confluenceV2Post(path: string, body: unknown): Promise<unknown> {
     const cloudId = await this.ensureCloudId();
-    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/rest/api${path}`;
+    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/wiki/api/v2${path}`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.headers(),
@@ -161,15 +165,16 @@ export class AtlassianClient {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(
-        `Confluence POST ${path} failed (${res.status}): ${text}`
+        `Confluence v2 POST ${path} failed (${res.status}): ${text}`
       );
     }
+    if (res.status === 204) return {};
     return res.json();
   }
 
-  async confluencePut(path: string, body: unknown): Promise<unknown> {
+  async confluenceV2Put(path: string, body: unknown): Promise<unknown> {
     const cloudId = await this.ensureCloudId();
-    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/rest/api${path}`;
+    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/wiki/api/v2${path}`;
     const res = await fetch(url, {
       method: "PUT",
       headers: this.headers(),
@@ -178,15 +183,15 @@ export class AtlassianClient {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(
-        `Confluence PUT ${path} failed (${res.status}): ${text}`
+        `Confluence v2 PUT ${path} failed (${res.status}): ${text}`
       );
     }
     return res.json();
   }
 
-  async confluenceDelete(path: string): Promise<void> {
+  async confluenceV2Delete(path: string): Promise<void> {
     const cloudId = await this.ensureCloudId();
-    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/rest/api${path}`;
+    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/wiki/api/v2${path}`;
     const res = await fetch(url, {
       method: "DELETE",
       headers: this.headers(),
@@ -194,25 +199,43 @@ export class AtlassianClient {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(
-        `Confluence DELETE ${path} failed (${res.status}): ${text}`
+        `Confluence v2 DELETE ${path} failed (${res.status}): ${text}`
       );
     }
   }
 
-  async confluenceGetBinary(path: string): Promise<Buffer> {
+  // Resolve a human-readable space key (e.g. "ENG") to the numeric space ID
+  // that v2 endpoints require. Cached because the mapping is stable per cloud.
+  async getSpaceIdByKey(spaceKey: string): Promise<string> {
+    const cached = this.spaceIdCache.get(spaceKey);
+    if (cached) return cached;
+
+    const data = (await this.confluenceV2Get(
+      `/spaces?keys=${encodeURIComponent(spaceKey)}`,
+    )) as { results?: Array<{ id: string; key: string }> };
+
+    const found = data.results?.find((s) => s.key === spaceKey) ?? data.results?.[0];
+    if (!found) {
+      throw new Error(`Confluence space with key '${spaceKey}' not found.`);
+    }
+
+    this.spaceIdCache.set(spaceKey, found.id);
+    return found.id;
+  }
+
+  // ── Confluence v1 helpers (wiki/rest/api) ─────────────────────
+  // Retained only for CQL search, which has no v2 equivalent.
+
+  async confluenceV1Get(path: string): Promise<unknown> {
     const cloudId = await this.ensureCloudId();
-    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/rest/api${path}`;
-    const res = await fetch(url, {
-      headers: {
-        ...this.headers(),
-        Accept: "application/octet-stream",
-      },
-    });
+    const url = `https://api.atlassian.com/ex/confluence/${cloudId}/wiki/rest/api${path}`;
+    const res = await fetch(url, { headers: this.headers() });
     if (!res.ok) {
+      const body = await res.text();
       throw new Error(
-        `Confluence GET binary ${path} failed (${res.status})`
+        `Confluence v1 GET ${path} failed (${res.status}): ${body}`
       );
     }
-    return Buffer.from(await res.arrayBuffer());
+    return res.json();
   }
 }
