@@ -107,7 +107,7 @@ export const jiraTools = [
   {
     name: "jira_create_issue",
     description:
-      "Create a new Jira issue in the specified project. Returns the created issue key and URL.",
+      "Create a new Jira issue in the specified project. You can set arbitrary fields at creation via additional_fields (e.g. assignee, priority, labels, components) — required for projects that reject unassigned issues. Returns the created issue key and URL.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -126,6 +126,11 @@ export const jiraTools = [
         issue_type: {
           type: "string",
           description: "Issue type name (default 'Task'). Common values: Task, Bug, Story, Epic",
+        },
+        additional_fields: {
+          type: "object",
+          description:
+            "Additional fields to set at creation, as a JSON object of field ID to value (e.g. {\"assignee\": {\"accountId\": \"abc123\"}, \"priority\": {\"name\": \"High\"}, \"labels\": [\"foo\"]}). Caller is responsible for value shape — pass-through to the Jira API.",
         },
       },
       required: ["project_key", "summary"],
@@ -408,6 +413,11 @@ export async function handleJira(
 
       if (description) {
         fields.description = textToAdf(description);
+      }
+
+      if (args.additional_fields !== undefined) {
+        const extra = args.additional_fields as Record<string, unknown>;
+        Object.assign(fields, extra);
       }
 
       const data = await client.jiraPost("/issue", { fields });
