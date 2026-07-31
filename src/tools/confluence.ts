@@ -24,7 +24,7 @@ export const confluenceTools = [
       },
       required: ["space_key"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "List Confluence pages", readOnlyHint: true, destructiveHint: false },
   },
   {
     name: "confluence_get_page",
@@ -46,7 +46,7 @@ export const confluenceTools = [
       },
       required: ["page_id"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Read Confluence page", readOnlyHint: true, destructiveHint: false },
   },
   {
     name: "confluence_create_page",
@@ -76,7 +76,7 @@ export const confluenceTools = [
       },
       required: ["title", "content", "space_key"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Create Confluence page", readOnlyHint: false, destructiveHint: false },
   },
   {
     name: "confluence_edit_page",
@@ -105,7 +105,7 @@ export const confluenceTools = [
       },
       required: ["page_id", "title", "content"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Edit Confluence page", readOnlyHint: false, destructiveHint: true },
   },
   {
     name: "confluence_delete_page",
@@ -120,7 +120,7 @@ export const confluenceTools = [
       },
       required: ["page_id"],
     },
-    annotations: { destructiveHint: true, readOnlyHint: false },
+    annotations: { title: "Delete Confluence page", readOnlyHint: false, destructiveHint: true },
   },
   {
     name: "confluence_search",
@@ -141,7 +141,7 @@ export const confluenceTools = [
       },
       required: ["cql"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Search Confluence", readOnlyHint: true, destructiveHint: false },
   },
   {
     name: "confluence_get_comments",
@@ -157,7 +157,7 @@ export const confluenceTools = [
       },
       required: ["page_id"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Get Confluence comments", readOnlyHint: true, destructiveHint: false },
   },
   {
     name: "confluence_add_comment",
@@ -183,7 +183,7 @@ export const confluenceTools = [
       },
       required: ["page_id", "body"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Add Confluence comment", readOnlyHint: false, destructiveHint: false },
   },
   {
     name: "confluence_get_attachment",
@@ -203,7 +203,7 @@ export const confluenceTools = [
       },
       required: ["page_id", "filename"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Get Confluence attachment", readOnlyHint: true, destructiveHint: false },
   },
 ] as const;
 

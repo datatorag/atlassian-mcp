@@ -43,7 +43,7 @@ export const jiraTools = [
       },
       required: ["query"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Search Jira users", readOnlyHint: true, destructiveHint: false },
   },
 
   // 2. JQL search
@@ -69,7 +69,7 @@ export const jiraTools = [
       },
       required: ["jql"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Search Jira issues", readOnlyHint: true, destructiveHint: false },
   },
 
   // 3. Get issue
@@ -87,7 +87,7 @@ export const jiraTools = [
       },
       required: ["issue_key"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Get Jira issue", readOnlyHint: true, destructiveHint: false },
   },
 
   // 4. List fields
@@ -100,7 +100,7 @@ export const jiraTools = [
       properties: {},
       required: [],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "List Jira fields", readOnlyHint: true, destructiveHint: false },
   },
 
   // 5. Create issue
@@ -135,7 +135,7 @@ export const jiraTools = [
       },
       required: ["project_key", "summary"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Create Jira issue", readOnlyHint: false, destructiveHint: false },
   },
 
   // 6. Update issue
@@ -166,7 +166,7 @@ export const jiraTools = [
       },
       required: ["issue_key"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Update Jira issue", readOnlyHint: false, destructiveHint: true },
   },
 
   // 7. Add comment
@@ -187,7 +187,7 @@ export const jiraTools = [
       },
       required: ["issue_key", "comment"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Add Jira comment", readOnlyHint: false, destructiveHint: false },
   },
 
   // 8. Edit comment
@@ -212,7 +212,7 @@ export const jiraTools = [
       },
       required: ["issue_key", "comment_id", "comment"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Edit Jira comment", readOnlyHint: false, destructiveHint: true },
   },
 
   // 9. Delete comment
@@ -233,7 +233,7 @@ export const jiraTools = [
       },
       required: ["issue_key", "comment_id"],
     },
-    annotations: { destructiveHint: true, readOnlyHint: false },
+    annotations: { title: "Delete Jira comment", readOnlyHint: false, destructiveHint: true },
   },
 
   // 10. Get comments
@@ -250,7 +250,7 @@ export const jiraTools = [
       },
       required: ["issue_key"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Get Jira comments", readOnlyHint: true, destructiveHint: false },
   },
 
   // 11. Get transitions
@@ -268,7 +268,7 @@ export const jiraTools = [
       },
       required: ["issue_key"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "List Jira transitions", readOnlyHint: true, destructiveHint: false },
   },
 
   // 12. Transition issue
@@ -290,7 +290,7 @@ export const jiraTools = [
       },
       required: ["issue_key", "transition_id"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: false },
+    annotations: { title: "Change Jira issue status", readOnlyHint: false, destructiveHint: false },
   },
 
   // 13. Get attachment metadata
@@ -308,7 +308,7 @@ export const jiraTools = [
       },
       required: ["attachment_id"],
     },
-    annotations: { destructiveHint: false, readOnlyHint: true },
+    annotations: { title: "Get Jira attachment", readOnlyHint: true, destructiveHint: false },
   },
 ];
 
