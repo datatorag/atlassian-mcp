@@ -310,6 +310,30 @@ export const jiraTools = [
     },
     annotations: { title: "Get Jira attachment", readOnlyHint: true, destructiveHint: false },
   },
+
+  // 14. Delete issue
+  {
+    name: "jira_delete_issue",
+    description:
+      "Permanently delete a Jira issue. THIS CANNOT BE UNDONE through the API — deleted issues do not go to a trash or archive, and the issue key is not reused, so every link to it breaks. Prefer transitioning the issue to Done or Won't Do, which keeps the history. Deleting an issue that has subtasks fails unless delete_subtasks is true, in which case the subtasks are destroyed with it. Deleting a parent does not delete linked issues, only subtasks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        issue_key: {
+          type: "string",
+          description: "The issue key to delete (e.g. PROJ-123)",
+        },
+        delete_subtasks: {
+          type: "boolean",
+          default: false,
+          description:
+            "Also delete the issue's subtasks. Required to be true when the issue has any — without it Jira rejects the whole call rather than deleting partially. Default false.",
+        },
+      },
+      required: ["issue_key"],
+    },
+    annotations: { title: "Delete Jira issue permanently", readOnlyHint: false, destructiveHint: true },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -524,6 +548,37 @@ export async function handleJira(
         content: raw.content,
       };
       return jsonResponse(result);
+    }
+
+    // ── 14. Delete issue ────────────────────────────────────────
+    case "jira_delete_issue": {
+      const issueKey = args.issue_key as string;
+      // Only this tool validates the key shape, and only because it is the one
+      // call that cannot be taken back. Everywhere else a malformed key costs
+      // a 404; here it is worth failing locally with a message that names the
+      // problem, rather than sending a delete built from input we did not
+      // recognise. encodeURIComponent already makes the path safe — this is
+      // about not issuing an irreversible request on a guess.
+      if (!/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(issueKey ?? "")) {
+        throw new Error(
+          `Not a Jira issue key: ${JSON.stringify(issueKey)}. Expected the form PROJ-123.`
+        );
+      }
+      // Jira defaults deleteSubtasks to false and then REJECTS the whole call
+      // if the issue has any, rather than deleting the parent alone. Sending
+      // the flag explicitly makes the caller's intent the thing that decides,
+      // instead of a default they never saw.
+      const deleteSubtasks = args.delete_subtasks === true;
+      await client.jiraDelete(
+        `/issue/${encodeURIComponent(issueKey)}?deleteSubtasks=${deleteSubtasks}`,
+      );
+      // The API returns 204 with no body, so there is nothing to read back and
+      // no way to confirm afterwards: the issue is gone, and a get would 404
+      // whether we deleted it or it never existed. Say what was done, plainly.
+      return textResponse(
+        `Issue ${issueKey} permanently deleted` +
+          (deleteSubtasks ? ", along with its subtasks." : ".")
+      );
     }
 
     default:

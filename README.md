@@ -1,15 +1,15 @@
 # Atlassian MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server for Jira and Confluence Cloud — search, issues, pages, comments, and attachments, 22 tools total.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server for Jira and Confluence Cloud — search, issues, pages, comments, and attachments.
 
 This server powers the Atlassian connector of [DataToRAG](https://datatorag.com), a hosted MCP gateway with per-user OAuth and Google Workspace tools alongside these — add `https://datatorag.com/mcp` to your MCP client and connect your Atlassian account from the [dashboard](https://datatorag.com/dashboard). Or run it yourself, standalone.
 
 ## Tools
 
-| Service | Tools | Operations |
-|---------|-------|------------|
-| **Jira** | 13 | search (JQL), get issue, create, update, transition, get transitions, list fields, search users, get/add/edit/delete comments, get attachment |
-| **Confluence** | 9 | search (CQL), list pages, get page, create, edit, delete, get/add comments, get attachment |
+| Service | Operations |
+|---------|------------|
+| **Jira** | search (JQL), get issue, create, update, **delete (permanent)**, transition, get transitions, list fields, search users, get/add/edit/delete comments, get attachment |
+| **Confluence** | search (CQL), list pages, get page, create, edit, delete, get/add comments, get attachment |
 
 ### Key tool details
 
@@ -18,6 +18,8 @@ This server powers the Atlassian connector of [DataToRAG](https://datatorag.com)
 **jira_create_issue / jira_update_issue** — Structured parameters for the common fields (project, type, summary, description, assignee, labels, priority), plus `additional_fields` for anything else the create/edit screens accept, including custom fields.
 
 **jira_transition_issue** — Moves an issue through its workflow. Use `jira_get_transitions` first to see which transitions are available from the issue's current status.
+
+**jira_delete_issue** — Permanently deletes an issue. There is no trash or archive and the key is never reused, so this is unrecoverable through the API and every link to the issue breaks. Transitioning to Done or Won't Do is almost always the right call instead. Deleting an issue that has subtasks fails unless `delete_subtasks` is true, which destroys them with it.
 
 **confluence_get_page / confluence_edit_page** — Read and write page bodies in Confluence storage format, with a `format` parameter on reads.
 
@@ -89,7 +91,7 @@ src/
 pnpm run dev    # Watch mode — recompiles on change
 ```
 
-No test framework — verification is `tsc` strict mode plus a live smoke test against a real Atlassian site, recorded in the commit body.
+`pnpm test` runs `tsc` in strict mode then the vitest suite, which pins tool annotations and the safety-critical bits of the destructive tools. That is the floor, not the whole story: behaviour still gets a live smoke test against a real Atlassian site, recorded in the commit body.
 
 ## License
 
