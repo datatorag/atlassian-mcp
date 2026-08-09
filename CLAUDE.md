@@ -37,6 +37,18 @@ tools via MCP over HTTP.
 - Tool schemas carry verbose parameter-documenting descriptions and
   `annotations: { destructiveHint, readOnlyHint }` on every tool
 
+## Rolling out
+
+Merging to `main` here does NOT put anything in front of users. Production
+runs its own checkout of this repo, pulled and rebuilt separately, so the
+plugin keeps serving the previous code until that happens and a restart picks
+it up. Treat "merged" and "live" as unrelated facts, and verify the second by
+calling the tool through the gateway rather than by reading a sha here.
+
+The rollout procedure is deliberately not in this repo and needs production
+access this repo's contributors are not assumed to have. It lives with the
+gateway's own deploy guidance (see below). Do not reconstruct it from memory.
+
 ## Cross-repo guidance
 
 DataToRAG development runs from the datatorag-mcp session; the canonical
