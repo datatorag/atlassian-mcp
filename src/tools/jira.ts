@@ -19,6 +19,52 @@ function textToAdf(text: string) {
   };
 }
 
+/** Fields jira_search asks the API for, and therefore the fields its rows
+ * carry.
+ *
+ * The enhanced search endpoint (/rest/api/3/search/jql) returns ONLY issue
+ * ids when `fields` is omitted. Atlassian's own migration guidance puts it
+ * plainly: skip `fields` and "Jira will just return ids". That default is a
+ * performance choice for callers who want a cheap id list, and it is the
+ * wrong one for a tool whose description promises key fields, because a bare
+ * numeric id is not a key: nothing downstream can resolve it without a second
+ * round trip per row.
+ *
+ * `key` is deliberately NOT in this list. It is not a field; it lives at the
+ * top level of each issue, alongside `id`, and arrives once the response is
+ * a full issue rather than an id stub. Adding it here would risk a 400 on an
+ * unrecognised field name and buy nothing. */
+const SEARCH_FIELDS = ["summary", "status", "priority", "assignee"] as const;
+
+/** Shape one search row into the fields the tool description promises.
+ *
+ * Mirrors jira_get_issue's shaping so the two tools agree on what an issue
+ * looks like. Every value is defaulted rather than left undefined: an absent
+ * key would be dropped by JSON.stringify entirely, which is precisely the
+ * failure this tool already shipped once, a row that silently lacks the
+ * field a caller needs, rather than one that says the field is empty. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function shapeSearchIssue(issue: any, siteUrl: string) {
+  const fields = issue?.fields ?? {};
+  const key = issue?.key ?? null;
+  return {
+    key,
+    id: issue?.id ?? null,
+    summary: fields.summary ?? null,
+    status: fields.status?.name ?? null,
+    priority: fields.priority?.name ?? null,
+    assignee: fields.assignee
+      ? {
+          displayName: fields.assignee.displayName,
+          accountId: fields.assignee.accountId,
+        }
+      : null,
+    // A link the caller can open, rather than the REST `self` URL the API
+    // hands back, which is only useful to another API call.
+    url: key ? `${siteUrl}/browse/${key}` : null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
@@ -360,12 +406,31 @@ export async function handleJira(
     case "jira_search": {
       const jql = args.jql as string;
       const maxResults = (args.max_results as number | undefined) ?? 50;
-      const body: Record<string, unknown> = { jql, maxResults };
+      const body: Record<string, unknown> = {
+        jql,
+        maxResults,
+        fields: [...SEARCH_FIELDS],
+      };
       if (args.next_page_token) {
         body.nextPageToken = args.next_page_token as string;
       }
-      const data = await client.jiraPost("/search/jql", body);
-      return jsonResponse(data);
+      const [data, siteUrl] = await Promise.all([
+        client.jiraPost("/search/jql", body) as Promise<{
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          issues?: any[];
+          nextPageToken?: string;
+          isLast?: boolean;
+        }>,
+        client.getSiteUrl(),
+      ]);
+
+      return jsonResponse({
+        issues: (data.issues ?? []).map((i) => shapeSearchIssue(i, siteUrl)),
+        // Pagination is cursor-based on this endpoint: there is no total and
+        // no startAt, so the token is the only way to reach the next page.
+        nextPageToken: data.nextPageToken ?? null,
+        isLast: data.isLast ?? null,
+      });
     }
 
     // ── 3. Get issue ────────────────────────────────────────────
@@ -444,8 +509,24 @@ export async function handleJira(
         Object.assign(fields, extra);
       }
 
-      const data = await client.jiraPost("/issue", { fields });
-      return jsonResponse(data);
+      const data = (await client.jiraPost("/issue", { fields })) as {
+        id?: string;
+        key?: string;
+        self?: string;
+      };
+
+      // The API's `self` is a REST endpoint: the address you GET or PUT the
+      // issue at, not one a person can open. The description promises a URL,
+      // so build the browsable one and keep `self` beside it under a name
+      // that says what it is, rather than letting a caller mistake it for a
+      // link they can hand to someone.
+      const siteUrl = await client.getSiteUrl();
+      return jsonResponse({
+        key: data.key ?? null,
+        id: data.id ?? null,
+        url: data.key ? `${siteUrl}/browse/${data.key}` : null,
+        apiUrl: data.self ?? null,
+      });
     }
 
     // ── 6. Update issue ─────────────────────────────────────────

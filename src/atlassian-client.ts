@@ -22,6 +22,7 @@ export interface AtlassianClientOptions {
 export class AtlassianClient {
   private accessToken?: string;
   private cloudId?: string;
+  private siteUrl?: string;
   private spaceIdCache = new Map<string, string>();
 
   constructor(options?: AtlassianClientOptions) {
@@ -31,12 +32,24 @@ export class AtlassianClient {
   withToken(accessToken: string): AtlassianClient {
     const c = new AtlassianClient({ accessToken });
     c.cloudId = this.cloudId;
+    c.siteUrl = this.siteUrl;
     c.spaceIdCache = this.spaceIdCache;
     return c;
   }
 
-  private async ensureCloudId(): Promise<string> {
-    if (this.cloudId) return this.cloudId;
+  /** Resolve the tenant once, keeping BOTH halves of the answer.
+   *
+   * accessible-resources returns the cloud ID and the site's browsable base
+   * URL together. Every API call needs the first; every link we hand a user
+   * needs the second, and it cannot be derived from the cloud ID. The calls
+   * all go through api.atlassian.com/ex/jira/{cloudId}, so the site's own
+   * hostname never appears anywhere else in a response we can read. Dropping
+   * the URL here is what forces callers to surface REST endpoints as if they
+   * were links. Cached and copied together so the two can never disagree. */
+  private async ensureSite(): Promise<{ cloudId: string; siteUrl: string }> {
+    if (this.cloudId && this.siteUrl) {
+      return { cloudId: this.cloudId, siteUrl: this.siteUrl };
+    }
     if (!this.accessToken) {
       throw new Error(
         "Atlassian is not connected. Please connect from the dashboard."
@@ -65,7 +78,20 @@ export class AtlassianClient {
 
     // Use the first accessible site
     this.cloudId = sites[0].id;
-    return this.cloudId;
+    // Trailing slashes vary by tenant; strip so callers can always join with
+    // a leading-slash path without producing a double slash.
+    this.siteUrl = sites[0].url.replace(/\/+$/, "");
+    return { cloudId: this.cloudId, siteUrl: this.siteUrl };
+  }
+
+  private async ensureCloudId(): Promise<string> {
+    return (await this.ensureSite()).cloudId;
+  }
+
+  /** The site's browsable base URL, e.g. https://example.atlassian.net.
+   * Use it to build links a person can actually open. */
+  async getSiteUrl(): Promise<string> {
+    return (await this.ensureSite()).siteUrl;
   }
 
   private headers(): Record<string, string> {

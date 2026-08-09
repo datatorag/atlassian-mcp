@@ -28,8 +28,12 @@ tools via MCP over HTTP.
 
 - ESM, TypeScript strict mode, output dir `server/`
 - Use `pnpm`, not `npm`
-- No test framework — verification is `tsc` plus a live smoke test; record
-  what was smoke-tested in the commit/PR body
+- `pnpm test` runs `tsc` over the whole tree (tests included) then vitest.
+  Tests use fixtures, never a live call, so they cannot show a MISSING or
+  wrong-shaped upstream response: pin the REQUEST we send where that is the
+  thing that matters, and give every guard a known-bad case alongside its
+  happy path. A live smoke test is still required before claiming a tool
+  works end to end; record what was smoke-tested in the commit/PR body
 - Tool schemas carry verbose parameter-documenting descriptions and
   `annotations: { destructiveHint, readOnlyHint }` on every tool
 

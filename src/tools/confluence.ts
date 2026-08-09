@@ -265,8 +265,15 @@ interface V1SearchResult {
       id: string;
       title?: string;
       version?: { number: number };
+      _links?: { webui?: string };
     };
-    _links?: { webui?: string };
+    // A CQL search RESULT carries its link as `url`, relative to the
+    // response's `_links.base`. It has no `_links.webui` of its own; that
+    // belongs to the wrapped `content`. The previous shape declared
+    // `_links.webui` here, so the property read cleanly as undefined and
+    // every row shipped link: null. Nothing failed; the type simply agreed
+    // with the mistake.
+    url?: string;
   }>;
   _links?: { base?: string };
 }
@@ -539,12 +546,15 @@ export async function handleConfluence(
         const id = c?.id ?? "";
         const title = c?.title ?? r.title ?? "";
         const version = c?.version?.number ?? null;
-        const webui = r._links?.webui ?? null;
+        // Prefer the result's own `url`, which every result carries; fall
+        // back to the wrapped content's webui link for result types that
+        // supply one and no url.
+        const relative = r.url ?? c?._links?.webui ?? null;
         return {
           id,
           title,
           version,
-          link: baseUrl && webui ? `${baseUrl}${webui}` : webui,
+          link: baseUrl && relative ? `${baseUrl}${relative}` : relative,
         };
       });
       return jsonResponse(results);
