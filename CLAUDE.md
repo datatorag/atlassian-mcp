@@ -21,6 +21,8 @@ tools via MCP over HTTP.
 - `src/tools/jira.ts`, `src/tools/confluence.ts` — one file per service:
   tool schemas + a `handle<Service>()` dispatch switch
 - `src/tools/response.ts` — shared response helpers
+- `src/internal/consume.ts`: the private `POST /internal/consume` route. The
+  gateway hands a file's bytes to a tool here; it is not an MCP tool
 - `datatorag.json` — plugin manifest the gateway reads (name, description,
   oauth block with env var *names*, never secret values)
 

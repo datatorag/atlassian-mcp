@@ -19,10 +19,24 @@ export interface AtlassianClientOptions {
   accessToken?: string;
 }
 
+/** A Jira call that was answered, and answered no. Kept apart from a plain
+ * Error so a caller can tell a refusal (the status is known) from a request
+ * that never completed (nothing is known). */
+export class AtlassianHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "AtlassianHttpError";
+  }
+}
+
 export class AtlassianClient {
   private accessToken?: string;
   private cloudId?: string;
   private siteUrl?: string;
+  private siteName?: string;
   private spaceIdCache = new Map<string, string>();
 
   constructor(options?: AtlassianClientOptions) {
@@ -33,6 +47,7 @@ export class AtlassianClient {
     const c = new AtlassianClient({ accessToken });
     c.cloudId = this.cloudId;
     c.siteUrl = this.siteUrl;
+    c.siteName = this.siteName;
     c.spaceIdCache = this.spaceIdCache;
     return c;
   }
@@ -46,9 +61,17 @@ export class AtlassianClient {
    * hostname never appears anywhere else in a response we can read. Dropping
    * the URL here is what forces callers to surface REST endpoints as if they
    * were links. Cached and copied together so the two can never disagree. */
-  private async ensureSite(): Promise<{ cloudId: string; siteUrl: string }> {
+  private async ensureSite(): Promise<{
+    cloudId: string;
+    siteUrl: string;
+    siteName: string;
+  }> {
     if (this.cloudId && this.siteUrl) {
-      return { cloudId: this.cloudId, siteUrl: this.siteUrl };
+      return {
+        cloudId: this.cloudId,
+        siteUrl: this.siteUrl,
+        siteName: this.siteName ?? "",
+      };
     }
     if (!this.accessToken) {
       throw new Error(
@@ -81,7 +104,12 @@ export class AtlassianClient {
     // Trailing slashes vary by tenant; strip so callers can always join with
     // a leading-slash path without producing a double slash.
     this.siteUrl = sites[0].url.replace(/\/+$/, "");
-    return { cloudId: this.cloudId, siteUrl: this.siteUrl };
+    this.siteName = sites[0].name ?? "";
+    return {
+      cloudId: this.cloudId,
+      siteUrl: this.siteUrl,
+      siteName: this.siteName,
+    };
   }
 
   private async ensureCloudId(): Promise<string> {
@@ -92,6 +120,14 @@ export class AtlassianClient {
    * Use it to build links a person can actually open. */
   async getSiteUrl(): Promise<string> {
     return (await this.ensureSite()).siteUrl;
+  }
+
+  /** The site every call from this client lands on, by the name and URL a
+   * person would recognise. A write that answers with these lets the caller
+   * see WHICH tenant was written to, which the cloud ID alone never shows. */
+  async getSite(): Promise<{ name: string; url: string }> {
+    const site = await this.ensureSite();
+    return { name: site.siteName, url: site.siteUrl };
   }
 
   private headers(): Record<string, string> {
@@ -133,6 +169,43 @@ export class AtlassianClient {
       throw new Error(`Jira POST ${path} failed (${res.status}): ${text}`);
     }
     if (res.status === 204) return {};
+    return res.json();
+  }
+
+  /** POST a multipart form, for the endpoints that take a file.
+   *
+   * Deliberately does not go through headers(): that forces
+   * `Content-Type: application/json`, and a multipart body needs fetch to
+   * write the content type itself, because only fetch knows the boundary it
+   * chose. `X-Atlassian-Token: no-check` is required by Jira on every
+   * multipart upload; without it the call is rejected as a possible XSRF.
+   *
+   * One attempt. An upload is not idempotent, so a retry after an unclear
+   * failure can attach the same file twice. */
+  async jiraPostMultipart(path: string, form: FormData): Promise<unknown> {
+    const cloudId = await this.ensureCloudId();
+    if (!this.accessToken) {
+      throw new Error(
+        "Atlassian is not connected. Please connect from the dashboard."
+      );
+    }
+    const url = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3${path}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`,
+        Accept: "application/json",
+        "X-Atlassian-Token": "no-check",
+      },
+      body: form,
+    });
+    if (!res.ok) {
+      const text = (await res.text()).slice(0, 500);
+      throw new AtlassianHttpError(
+        `Jira POST ${path} failed (${res.status}): ${text}`,
+        res.status
+      );
+    }
     return res.json();
   }
 
