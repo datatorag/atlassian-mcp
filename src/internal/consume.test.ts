@@ -386,8 +386,45 @@ describe("jira_add_attachment through the MCP path", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const file = (tool?.inputSchema.properties as any).file;
     expect(file.required).toEqual(["type", "message_id"]);
-    expect(file.properties.type.enum).toEqual(["gmail_message"]);
+    expect(file.properties.type.enum).toEqual(["gmail_message", "gmail_attachment"]);
     expect(tool?.description).not.toContain(String.fromCharCode(0x2014));
+  });
+
+  /** The schema is the only thing a model reads before it calls. A gateway
+   * can resolve a reference this schema does not name, and then the form
+   * exists and nothing can discover it; a client that checks arguments
+   * against the schema would refuse it outright. */
+  it("advertises the attachment form: the type, the part id, and one file per call", () => {
+    const tool = allTools.find((t) => t.name === "jira_add_attachment");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const file = (tool?.inputSchema.properties as any).file;
+    expect(file.properties.part_id.type).toBe("string");
+    expect(file.properties.part_id.description).toMatch(/gmail_read/);
+    expect(file.properties.part_id.description).toMatch(/Required with gmail_attachment/);
+    // Optional in the schema: a whole-message reference has no part.
+    expect(file.required).not.toContain("part_id");
+    // Never the attachment id: Gmail issues a new one on every read, so a
+    // reference built from it stops naming anything.
+    expect(Object.keys(file.properties).sort()).toEqual([
+      "account",
+      "message_id",
+      "part_id",
+      "type",
+    ]);
+    expect(file.description).toContain('"type": "gmail_message"');
+    expect(file.description).toContain('"type": "gmail_attachment"');
+    expect(file.description).toContain('"part_id"');
+    expect(file.properties.type.description).not.toMatch(/only/i);
+
+    const d = tool?.description ?? "";
+    expect(d).toContain("A gmail_message reference attaches a whole email as its original .eml");
+    expect(d).toContain("A gmail_attachment reference attaches one attachment of an email");
+    expect(d).toContain("Several attachments are several calls, one file per call.");
+    expect(d).not.toMatch(/only file reference/i);
+    // What the description already promised stays promised.
+    expect(d).toContain("its bytes never pass through the conversation");
+    expect(d).toContain("The answer is a receipt");
+    expect(d).toContain("The upload is never retried");
   });
 
   it("returns an error and asks Jira nothing when no bytes were supplied", async () => {
