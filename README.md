@@ -1,5 +1,12 @@
 # Atlassian MCP Server
 
+> **This repository has moved and is archived.** The code now lives in
+> [`datatorag/mcp-gateway`](https://github.com/datatorag/mcp-gateway) under
+> [`plugins/atlassian-mcp`](https://github.com/datatorag/mcp-gateway/tree/main/plugins/atlassian-mcp),
+> with its history. Issues and pull requests go there. Nothing here is
+> updated any more, and what follows describes this repository as it was
+> when it was frozen.
+
 A [Model Context Protocol](https://modelcontextprotocol.io/) server for Jira and Confluence Cloud — search, issues, pages, comments, and attachments.
 
 This server powers the Atlassian connector of [DataToRAG](https://datatorag.com), a hosted MCP gateway with per-user OAuth and Google Workspace tools alongside these — add `https://datatorag.com/mcp` to your MCP client and connect your Atlassian account from the [dashboard](https://datatorag.com/dashboard). Or run it yourself, standalone.
